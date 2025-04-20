@@ -1,0 +1,6 @@
+__pycache__
+mumble-env
+MumbleServer
+MumbleServer_ice.py
+MumbleServer.ice
+config.yml
