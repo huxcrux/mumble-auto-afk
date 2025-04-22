@@ -1,5 +1,6 @@
 __pycache__
 mumble-env
+venv
 MumbleServer
 MumbleServer_ice.py
 MumbleServer.ice
