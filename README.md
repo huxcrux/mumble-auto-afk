@@ -63,7 +63,7 @@ Move idling users to AFK automatically
 
 ```yml
   mumble-auto-afk:
-    image: github.com/huxcrux/mumble-auto-afk:latest
+    image: ghcr.io/huxcrux/mumble-auto-afk:latest
     container_name: mumble-auto-afk # in case you run multiple containers make sure name are unique
     restart: always
     network_mode: "service:mumble_auth" # "mumble_auth" is the name if the mumble service, update if needed
