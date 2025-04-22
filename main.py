@@ -1,129 +1,135 @@
 #!/usr/bin/env python3
-import Ice
+import os
+import sys
 import time
 import yaml
-import MumbleServer
-import sys
-import os
 import logging
-from datetime import datetime
+import Ice
+import MumbleServer
 
-# --- Configure logging ---
+CONFIG_PATH = "config.yml"
+MAX_RETRIES = 10
+RETRY_DELAY = 10
+CHECK_INTERVAL = 60  # seconds
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S"
 )
 
-# --- Load YAML config ---
-def load_config(path="config.yml"):
-    with open(path, "r") as f:
-        config = yaml.safe_load(f)
-
-    required = {
+def load_config(path=CONFIG_PATH):
+    required_keys = {
         "server": ["host", "port", "server_id"],
         "auth": ["password"],
         "afk": ["idle_threshold", "afk_channel_id"],
     }
 
-    for section, keys in required.items():
-        if section not in config:
-            raise ValueError(f"Missing section '{section}' in config.")
-        for key in keys:
-            if key not in config[section]:
-                raise ValueError(f"Missing key '{section}.{key}' in config.")
+    config_data = {}
+    if os.path.exists(path):
+        with open(path, "r") as f:
+            config_data = yaml.safe_load(f) or {}
 
-    return config
-
-# --- Apply ENV overrides ---
-def override_with_env(config):
-    def get_env(section, key, cast=str):
-        env_key = f"MUMBLE_{section.upper()}_{key.upper()}"
-        if env_key in os.environ:
-            try:
-                return cast(os.environ[env_key])
-            except Exception:
-                raise ValueError(f"Invalid value for {env_key}")
-        return config[section][key]
-
-    return {
-        "server": {
-            "host": get_env("server", "host"),
-            "port": get_env("server", "port", int),
-            "server_id": get_env("server", "server_id", int),
-        },
-        "auth": {
-            "password": get_env("auth", "password"),
-        },
-        "afk": {
-            "idle_threshold": get_env("afk", "idle_threshold", int),
-            "afk_channel_id": get_env("afk", "afk_channel_id", int),
-        },
+    # Custom ENV mappings
+    env_override_map = {
+        ("server", "port"): "MUMBLE_ICE_PORT",
+        ("auth", "password"): "MUMBLE_ICE_SECRET",
+        ("afk", "afk_channel_id"): "MUMBLE_AFK_CHANNEL_ID",
     }
 
-# --- AutoAFK core logic ---
-class AutoAFK:
-    def __init__(self, server, afk_channel_id, idle_threshold):
-        self.server = server
-        self.afk_channel_id = afk_channel_id
-        self.idle_threshold = idle_threshold
+    # Defaults
+    defaults = {
+        ("server", "host"): "localhost",
+        ("server", "server_id"): 1,
+    }
 
-    def run(self):
-        logging.info("AutoAFK monitoring started, will check for idle users once a minute")
-        while True:
-            users = self.server.getUsers()
-            for session, user in users.items():
-                if user.channel != self.afk_channel_id and user.idlesecs > self.idle_threshold:
-                    logging.info(f"Moved user '{user.name}' to AFK (idle {user.idlesecs}s).")
-                    user.channel = self.afk_channel_id
-                    self.server.setState(user)
-            time.sleep(60)
+    def get_env_override(section, key):
+        env_key = env_override_map.get((section, key), f"MUMBLE_{section.upper()}_{key.upper()}")
+        return os.getenv(env_key)
 
-# --- Main entrypoint ---
+    final_config = {}
+    for section, keys in required_keys.items():
+        final_config[section] = {}
+        for key in keys:
+            raw_val = get_env_override(section, key)
+            if raw_val is None:
+                raw_val = config_data.get(section, {}).get(key)
+            if raw_val is None:
+                raw_val = defaults.get((section, key))
+            if raw_val is None:
+                raise ValueError(f"Missing required config value: {section}.{key}")
+
+            if key in ["port", "server_id", "idle_threshold", "afk_channel_id"]:
+                try:
+                    raw_val = int(raw_val)
+                except ValueError:
+                    raise ValueError(f"Invalid integer for {section}.{key}: {raw_val}")
+
+            final_config[section][key] = raw_val
+
+    return final_config
+
+def setup_ice_connection(config):
+    props = Ice.createProperties([])
+    props.setProperty("Ice.ImplicitContext", "Shared")
+    props.setProperty("Ice.MessageSizeMax", "65535")
+    props.setProperty("Ice.Default.EncodingVersion", "1.0")
+
+    idata = Ice.InitializationData()
+    idata.properties = props
+    communicator = Ice.initialize(idata)
+    communicator.getImplicitContext().put("secret", config["auth"]["password"])
+
+    proxy = communicator.stringToProxy(f'Meta:tcp -h {config["server"]["host"]} -p {config["server"]["port"]}')
+    meta = MumbleServer.MetaPrx.checkedCast(proxy)
+    if not meta:
+        raise RuntimeError("Invalid Meta proxy.")
+    return communicator, meta.getServer(config["server"]["server_id"])
+
+def reconnect_with_retry(config):
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            logging.info(f"Attempting to connect to server (attempt {attempt}/{MAX_RETRIES})")
+            return setup_ice_connection(config)
+        except Exception as e:
+            logging.warning(f"Connection attempt {attempt} failed: {e}")
+            if attempt < MAX_RETRIES:
+                time.sleep(RETRY_DELAY)
+            else:
+                logging.error("Failed to reconnect after multiple attempts.")
+                sys.exit(1)
+
 def main():
     try:
-        config = override_with_env(load_config())
-
-        host = config["server"]["host"]
-        port = config["server"]["port"]
-        server_id = config["server"]["server_id"]
-        password = config["auth"]["password"]
-        afk_channel_id = config["afk"]["afk_channel_id"]
-        idle_threshold = config["afk"]["idle_threshold"]
-
-        # Set Ice properties
-        props = Ice.createProperties([])
-        props.setProperty("Ice.ImplicitContext", "Shared")
-        props.setProperty("Ice.MessageSizeMax", "65535")
-        props.setProperty("Ice.Default.EncodingVersion", "1.0")
-
-        idata = Ice.InitializationData()
-        idata.properties = props
-        ice = Ice.initialize(idata)
-
-        # Set shared secret for authentication
-        ice.getImplicitContext().put("secret", password)
-
-
-        # Connect to Meta interface
-        proxy = ice.stringToProxy(f'Meta:tcp -h {host} -p {port}')
-        meta = MumbleServer.MetaPrx.checkedCast(proxy)
-
-        if not meta:
-            raise RuntimeError("Failed to connect: invalid Meta proxy.")
-
-        try:
-            server = meta.getServer(server_id)
-        except MumbleServer.InvalidSecretException:
-            logging.error("Invalid Ice secret (check murmur.ini icesecretwrite or icesecretread).")
-            sys.exit(1)
-
-        afk = AutoAFK(server, afk_channel_id, idle_threshold)
-        afk.run()
-
+        config = load_config()
     except Exception as e:
-        logging.exception(f"Fatal error: {e}")
+        logging.error(f"Failed to load config: {e}")
         sys.exit(1)
+
+    communicator, server = reconnect_with_retry(config)
+
+    afk_channel_id = config["afk"]["afk_channel_id"]
+    idle_threshold = config["afk"]["idle_threshold"]
+
+    logging.info("Starting AutoAFK loop.")
+    while True:
+        try:
+            users = server.getUsers()
+            for user in users.values():
+                if user.channel != afk_channel_id and user.idlesecs > idle_threshold:
+                    logging.info(f"Moving '{user.name}' to AFK (idle {user.idlesecs}s)")
+                    user.channel = afk_channel_id
+                    server.setState(user)
+        except Exception as e:
+            logging.warning(f"Connection error: {e}. Attempting to reconnect...")
+            try:
+                if communicator.isAlive():
+                    communicator.destroy()
+            except:
+                pass
+            communicator, server = reconnect_with_retry(config)
+
+        time.sleep(CHECK_INTERVAL)
 
 if __name__ == "__main__":
     main()

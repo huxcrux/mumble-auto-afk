@@ -1,0 +1,29 @@
+version: "3.8"
+
+services:
+  mumble:
+    image: mumblevoip/mumble-server:latest
+    container_name: mumble
+    restart: unless-stopped
+    environment:
+      - MUMBLE_SUPW=adminpass  # replace with your desired SuperUser password
+    ports:
+      - "64738:64738/tcp"
+      - "64738:64738/udp"
+    volumes:
+      - ./murmur.ini:/etc/mumble-server.ini
+      - mumble-data:/data
+
+  mumble-auto-afk:
+    image: github.com/huxcrux/mumble-auto-afk:latest
+    container_name: mumble-auto-afk
+    restart: always
+    network_mode: "service:mumble"
+    environment:
+      - MUMBLE_AFK_IDLE_THRESHOLD=30
+      - MUMBLE_AFK_CHANNEL_ID=1
+    depends_on:
+      - mumble
+
+volumes:
+  mumble-data:
