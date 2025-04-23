@@ -17,8 +17,8 @@ COPY main.py /app/main.py
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Add /install/bin to PATH and compile the ICE interface
-RUN wget -O MumbleServer.ice https://raw.githubusercontent.com/mumble-voip/mumble/refs/heads/1.5.x/src/murmur/MumbleServer.ice && \
-    slice2py MumbleServer.ice && \
-    rm MumbleServer.ice
+RUN wget -O Murmur.ice https://raw.githubusercontent.com/mumble-voip/mumble/refs/tags/v1.4.287/src/murmur/Murmur.ice && \
+    slice2py Murmur.ice && \
+    rm Murmur.ice
 
 CMD ["python3", "main.py"]

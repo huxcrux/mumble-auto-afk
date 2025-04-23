@@ -5,7 +5,7 @@ import time
 import yaml
 import logging
 import Ice
-import MumbleServer
+import Murmur
 
 CONFIG_PATH = "config.yml"
 MAX_RETRIES = 10
@@ -81,7 +81,7 @@ def setup_ice_connection(config):
     communicator.getImplicitContext().put("secret", config["auth"]["password"])
 
     proxy = communicator.stringToProxy(f'Meta:tcp -h {config["server"]["host"]} -p {config["server"]["port"]}')
-    meta = MumbleServer.MetaPrx.checkedCast(proxy)
+    meta = Murmur.MetaPrx.checkedCast(proxy)
     if not meta:
         raise RuntimeError("Invalid Meta proxy.")
     return communicator, meta.getServer(config["server"]["server_id"])

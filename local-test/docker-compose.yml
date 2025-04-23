@@ -1,17 +1,17 @@
-version: "3.8"
-
 services:
   mumble:
-    image: mumblevoip/mumble-server:latest
+    image: mumblevoip/mumble-server:v1.4.287-4
     container_name: mumble
     restart: unless-stopped
+    entrypoint: /usr/bin/mumble-server
+    command: "-fg -ini /data/murmur.ini"
     environment:
       - MUMBLE_SUPW=adminpass  # replace with your desired SuperUser password
     ports:
       - "64738:64738/tcp"
       - "64738:64738/udp"
     volumes:
-      - ./murmur.ini:/etc/mumble-server.ini
+      - ./murmur.ini:/data//murmur.ini
       - mumble-data:/data
 
   mumble-auto-afk:
@@ -22,6 +22,9 @@ services:
     environment:
       - MUMBLE_AFK_IDLE_THRESHOLD=30
       - MUMBLE_AFK_CHANNEL_ID=1
+      - MUMBLE_SERVER_HOST=localhost
+      - MUMBLE_ICE_PORT=6502
+      - MUMBLE_ICE_SECRET=supersecretpass
     depends_on:
       - mumble
 
