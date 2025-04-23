@@ -73,7 +73,7 @@ Move idling users to AFK automatically
       - MUMBLE_AFK_IDLE_THRESHOLD=14400 # how long the user needs to be idle in seconds
       - MUMBLE_AFK_CHANNEL_ID=1 # the ID of the AFK channel, can be seen from edit menu
     depends_on:
-      - mumble
+      - mumble_auth # "mumble_auth" is the name if the mumble service, update if needed
 ```
 
 ## All env vars if you wish to use them instead of a config file
